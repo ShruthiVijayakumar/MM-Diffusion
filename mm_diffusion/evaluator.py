@@ -50,9 +50,9 @@ def load_multimodal_for_worker(base_dir, video_size):
         audio_fps=AUDIO_RATE
     )
    
-    for video_batch, audio_batch in data:
+    for video_batch, audio_batch, label_batch in data:
         video_batch = ((video_batch + 1) * 127.5).clamp(0, 255).to(th.uint8)
-        gt_batch = {"video": video_batch, "audio":audio_batch}
+        gt_batch = {"video": video_batch, "audio":audio_batch, "label":label_batch}
         
         yield gt_batch
 

@@ -5,7 +5,7 @@ MODEL_FLAGS="--cross_attention_resolutions 2,4,8  --cross_attention_windows 1,4,
 --audio_attention_resolutions -1
 --video_size 16,3,64,64 --audio_size 1,25600 --learn_sigma False --num_channels 128 
 --num_head_channels 64 --num_res_blocks 2 --resblock_updown True --use_fp16 True
---use_scale_shift_norm True"
+--use_scale_shift_norm True --num_classes 9"
 
 SRMODEL_FLAGS="--sr_attention_resolutions 8,16,32  --large_size 256  
 --small_size 64 --sr_learn_sigma True 
@@ -20,10 +20,10 @@ DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear
 SR_DIFFUSION_FLAGS="--sr_diffusion_steps 1000  --sr_sample_fn ddim  --sr_timestep_respacing ddim25"
 
 # Modify the following paths to your own paths
-MULTIMODAL_MODEL_PATH="/data10/rld/outputs/MM-Diffusion/models/AIST++.pt"
-SR_MODEL_PATH="/data10/rld/outputs/MM-Diffusion/models/AIST++_SR.pt"
-OUT_DIR="/data10/rld/outputs/MM-Diffusion/samples/multimodal-sample-sr/dpm_solver"
-REF_PATH="/data10/rld/dataset/AIST++_crop/train"
+MULTIMODAL_MODEL_PATH="/home/vijayaku/MM-Diffusion-conditional/MM-Diffusion/output_conditional_8k/model100000.pt"
+SR_MODEL_PATH="/home/vijayaku/MM-Diffusion/Checkpoints/landscape_SR.pt"
+OUT_DIR="/home/vijayaku/MM-Diffusion-conditional/MM-Diffusion/output_fineTuning_samples"
+REF_PATH="/home/vijayaku/MM-Diffusion/datasets/landscape/landscape/train"
 
 NUM_GPUS=4
 mpiexec -n $NUM_GPUS python3 py_scripts/multimodal_sample_sr.py  \

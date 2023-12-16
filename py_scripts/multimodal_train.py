@@ -28,8 +28,8 @@ def load_training_data(args):
         audio_fps=args.audio_fps
     )
    
-    for video_batch, audio_batch in data:
-        gt_batch = {"video": video_batch, "audio":audio_batch}
+    for video_batch, audio_batch, label_batch in data:
+        gt_batch = {"video": video_batch, "audio":audio_batch, "label":label_batch}
       
         yield gt_batch
 
@@ -43,18 +43,18 @@ def main():
     dist_util.setup_dist(args.devices)
    
     args = set_seed_logger_random(args)
-
+    #logger.log(f"video shape {args.video_size}; audio shape {args.audio_size}")
     logger.log("creating model and diffusion...")
     
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, [key for key in model_and_diffusion_defaults().keys()])
     )
-    
+    #logger.log(f"video shape {args.video_size}; audio shape {args.audio_size}")
     model.to(dist_util.dev())
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
     logger.log("creating data loader...")
-
+    #logger.log(f"video shape {args.video_size}; audio shape {args.audio_size}")
     data = load_training_data(args)
 
    
@@ -80,6 +80,8 @@ def main():
         sample_fn=args.sample_fn,
         video_fps= args.video_fps,
         audio_fps= args.audio_fps,
+        class_cond=args.class_cond,
+        num_classes=args.num_classes,
     ).run_loop()
 
 
@@ -109,6 +111,7 @@ def create_argparser():
         frame_gap=1,
         video_fps=10,
         audio_fps=16000,
+        class_cond=False,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

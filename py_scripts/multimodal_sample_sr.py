@@ -26,6 +26,8 @@ from mm_diffusion.multimodal_dpm_solver_plus import DPM_Solver as multimodal_DPM
 from mm_diffusion.dpm_solver_plus import DPM_Solver as singlemodal_DPM_Solver
 from mm_diffusion.evaluator import eval_multimodal
 
+
+
 def main():
     args = create_argparser().parse_args()
     args.video_size = [int(i) for i in args.video_size.split(',')]
@@ -77,6 +79,7 @@ def main():
         multimodal_model.load_state_dict_(
             dist_util.load_state_dict(model_path, map_location="cpu"), is_strict=args.is_strict
         )
+        #logger.log(f"multimodal_model.label_emb{multimodal_model.label_emb}")
         
         multimodal_model.to(dist_util.dev())
         if args.use_fp16:
@@ -99,16 +102,13 @@ def main():
 
         
         while groups * args.batch_size *  dist.get_world_size()< args.all_save_num: 
-        
             all_labels = []
        
             model_kwargs = {}
 
             if args.class_cond:
-                classes = th.randint(
-                   low=0, high=NUM_CLASSES, size=(args.batch_size,), device=dist_util.dev()
-                )
-                model_kwargs["y"] = classes
+                classes = th.tensor([7,7,7,7], device=dist_util.dev())
+                model_kwargs['label'] = classes
 
             shape = {"video":(args.batch_size , *args.video_size), \
                     "audio":(args.batch_size , *args.audio_size)
@@ -118,8 +118,8 @@ def main():
                 # sample = sample_fn(shape = shape, \
                 #     model_fn = multimodal_model, steps=args.timestep_respacing)
 
-                dpm_solver = multimodal_DPM_Solver(model=multimodal_model, \
-                    alphas_cumprod=th.tensor(multimodal_diffusion.alphas_cumprod, dtype=th.float32))
+                dpm_solver = multimodal_DPM_Solver(model=multimodal_model,  \
+                    alphas_cumprod=th.tensor(multimodal_diffusion.alphas_cumprod, dtype=th.float32),model_kwargs=model_kwargs)
                 x_T = {"video":th.randn(shape["video"]).to(dist_util.dev()), \
                         "audio":th.randn(shape["audio"]).to(dist_util.dev())}
                 sample = dpm_solver.sample(
@@ -131,9 +131,9 @@ def main():
                 )
 
             elif args.sample_fn == 'dpm_solver++':
-                dpm_solver = multimodal_DPM_Solver(model=multimodal_model, \
+                dpm_solver = multimodal_DPM_Solver(model=multimodal_model,\
                     alphas_cumprod=th.tensor(multimodal_diffusion.alphas_cumprod, dtype=th.float32), \
-                        predict_x0=True, thresholding=True)
+                        predict_x0=True, thresholding=True, model_kwargs=model_kwargs)
                 
                 x_T = {"video":th.randn(shape["video"]).to(dist_util.dev()), \
                         "audio":th.randn(shape["audio"]).to(dist_util.dev())}
@@ -155,7 +155,7 @@ def main():
                     clip_denoised=args.clip_denoised,
                     model_kwargs=model_kwargs,
                 )
-
+            logger.log(f"model_kwargs: {model_kwargs}")
             video = ((sample["video"] + 1) * 127.5).clamp(0, 255).to(th.uint8)
             audio = sample["audio"]              
             video = video.permute(0, 1, 3, 4, 2)
@@ -166,6 +166,20 @@ def main():
 
             if args.class_cond:
                 all_labels = classes.cpu().numpy() 
+
+            
+            # # Create directories for each unique label
+            # unique_labels = np.unique(all_labels)
+            # for label in unique_labels:
+            #   label_dir_multimodal_save_path = os.path.join(multimodal_save_path, str(label))
+            #   label_dir_sr_save_path =  os.path.join(sr_save_path, str(label))
+            #   label_dir_audio = os.path.join(audio_save_path,str(label))
+            #   label_dir_images = os.path.join(img_save_path,str(label))
+            #   #logger.log(f"label_dir_multimodal_save_path: {label_dir_multimodal_save_path}")
+            #   os.makedirs(label_dir_multimodal_save_path, exist_ok=True)
+            #   os.makedirs(label_dir_sr_save_path, exist_ok=True)
+            #   os.makedirs(label_dir_audio, exist_ok=True)
+            #   os.makedirs(label_dir_images, exist_ok=True)
                 
                            
             idx = 0
@@ -294,6 +308,7 @@ def create_argparser():
         video_fps=10,
         audio_fps=16000,
         load_noise="",
+        class_cond=True,
         
 
     )

@@ -12,6 +12,7 @@ from torchvision.datasets.video_utils import VideoClips
 from torchvision import transforms as T
 from torchvision.transforms import InterpolationMode
 from moviepy.editor import AudioFileClip
+from . import logger
 
 def load_data(
     *,
@@ -43,11 +44,14 @@ def load_data(
         raise ValueError("unspecified data directory")
    
     all_files = []
-    
     all_files.extend(_list_video_files_recursively(data_dir)) 
+
+    #logger.log(f"all_files: {all_files}")
+    
     if MPI.COMM_WORLD.Get_rank()==0:
         print(f"len(data loader):{len(all_files)}")
-       
+
+    #logger.log(f"video_size[1] {video_size[1]}; audio_size[1] {audio_size[1]}")   
     clip_length_in_frames = video_size[0]
     frames_between_clips = 1
     meta_fname = os.path.join(data_dir, f"video_clip_f{clip_length_in_frames}_g{frames_between_clips}_r{video_fps}.pkl")
@@ -77,8 +81,12 @@ def load_data(
                 frames_between_clips=frames_between_clips,
                 frame_rate = video_fps,
                 _precomputed_metadata=metadata)
+        
 
-    print(f"load {video_clips.num_clips()} video clips from {meta_fname}......")
+    logger.log(f"load {video_clips.num_clips()} video clips from {meta_fname}......")
+    class_labels=_list_label_video_files_recursively(data_dir)
+    #logger.log(f"class_label {class_labels}......")
+    
     dataset = MultimodalDataset(
         video_size = video_size,
         audio_size = audio_size,
@@ -87,7 +95,8 @@ def load_data(
         num_shards = MPI.COMM_WORLD.Get_size(),
         random_flip = random_flip,
         audio_fps = audio_fps,
-        frame_gap = frame_gap
+        frame_gap = frame_gap,
+        class_labels=class_labels
     )
     
     if deterministic:
@@ -115,6 +124,21 @@ def _list_video_files_recursively(data_dir):
             results.extend(_list_video_files_recursively(full_path))
     return results
 
+def _list_label_video_files_recursively(data_dir):
+    dictionary_result_label = {}
+    i=0
+    for entry in sorted(bf.listdir(data_dir)):
+        full_path = bf.join(data_dir, entry)
+        if bf.isdir(full_path):
+            # currentLabel = str(entry)
+            dictionary_result_label[i]=_list_video_files_recursively(full_path)
+            i+=1
+    return dictionary_result_label
+
+
+
+
+
 class MultimodalDataset(Dataset):
     """
     :param video_size: [F,3,H,W] the size to which video frames are resized.
@@ -134,7 +158,8 @@ class MultimodalDataset(Dataset):
         num_shards=1,
         random_flip=True,
         audio_fps=None,
-        frame_gap=1
+        frame_gap=1,
+        class_labels={}    
     ):
         super().__init__()
         self.video_size = video_size#[f,C,H,W]
@@ -144,8 +169,11 @@ class MultimodalDataset(Dataset):
         self.audio_fps = audio_fps
         self.frame_gap = frame_gap
         self.size = self.video_clips.num_clips()
+        self.class_labels = class_labels
         self.shuffle_indices = [i for i in list(range(self.size))[shard:][::num_shards]]
         random.shuffle(self.shuffle_indices)
+    
+        
 
     def __len__(self):
         return len(self.shuffle_indices)
@@ -203,7 +231,7 @@ class MultimodalDataset(Dataset):
        
         video_path = self.video_clips.video_paths[video_idx]
         raw_audio =  AudioFileClip(video_path, fps=audio_fps).subclip(start_t, end_t)
-        
+        #logger.log(f"video_path: {video_path}")
         audio = np.zeros(self.audio_size)
         raw_audio= raw_audio.to_soundarray()
         if raw_audio.shape[1] == 2:
@@ -214,14 +242,22 @@ class MultimodalDataset(Dataset):
             audio = raw_audio[:, :self.audio_size[1]]
 
         audio = th.tensor(audio)
-        
-        return video_after_process, audio
+
+        #getting class labels
+        label= None
+        for key, value in self.class_labels.items():
+            if video_path in value:
+                label = key
+                break
+ 
+        #logger.log(f"getitem(self,idx): video_after_process: {video_after_process}; audio:  {audio} ; label {label}......")
+        return video_after_process, audio, label
     
     def __getitem__(self, idx):
         idx = self.shuffle_indices[idx]
-        video_after_process, audio = self.get_item(idx)
-
-        return video_after_process, audio
+        video_after_process, audio,label = self.get_item(idx)
+        #logger.log(f"__getitem__: video_after_process: {video_after_process}; audio:  {audio} ; label {label}......")
+        return video_after_process, audio,label
 
 
 if __name__=='__main__':

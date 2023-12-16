@@ -750,7 +750,6 @@ class MultimodalUNet(nn.Module):
         audio_attention_resolutions,
         video_type="2d+1d",
         audio_type="1d",
-
         dropout=0,
         channel_mult=(1, 2, 3, 4),
         num_classes=None,
@@ -1065,7 +1064,7 @@ class MultimodalUNet(nn.Module):
         :return: a video output of [N x F x C x H x W] Tensor, an audio output of [N x C x L] 
         """
         
-       
+        logger.log(f"label is not None {label}; num_classes {self.num_classes}")
         assert (label is not None) == (
             self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
@@ -1073,9 +1072,8 @@ class MultimodalUNet(nn.Module):
         video_hs = []
         audio_hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels)) # 
-    
         if self.num_classes is not None:
-            assert label.shape == (video.shape[0])
+            assert label.shape[0] == (video.shape[0])
             emb = emb + self.label_emb(label)
 
         video = video.type(self.dtype)

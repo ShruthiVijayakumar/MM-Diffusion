@@ -30,7 +30,7 @@ class TrainLoop:
         diffusion,
         data,
         batch_size,
-        microbatch,
+        microbatch=9,
         ema_rate,
         log_interval,
         save_interval,
@@ -43,7 +43,7 @@ class TrainLoop:
         schedule_sampler=None,
         weight_decay=0.0,
         lr_anneal_steps=0,
-        class_cond=False,
+        class_cond=True,
         use_db=False,
         sample_fn='dpm_solver',
         num_classes=0,
@@ -227,9 +227,20 @@ class TrainLoop:
         ):
                     
             batch = next(self.data)
+            #label_dict to 
+            label_dict={}
+            key_label = 'label'
+            if key_label in batch:
+                value = batch[key_label]
+                value.tolist()
+                label_dict = {key_label:value}
+            else:
+                label_dict = {}
+            logger.log(f"label_dict {label_dict}")
             # print(f"time to fetch a batch: {time.time()-time_start}")
-        
-            loss = self.run_step(batch)
+            #logger.log(f"run_loop(self): batch: {batch}; ......")
+            
+            loss = self.run_step(batch,label_dict)
             
             if dist.get_rank() == 0 and self.use_db:
                 wandb_log = { 'loss': loss["loss"].mean().item()}
@@ -296,6 +307,7 @@ class TrainLoop:
                 k: v[i : i + self.microbatch]
                 for k, v in cond.items()
             }
+            logger.log(f"forward_backward: micro_cond{micro_cond}")
             
             last_batch = (i + self.microbatch) >= batch_len
             t, weights = self.schedule_sampler.sample(self.batch_size, dist_util.dev())
@@ -308,6 +320,8 @@ class TrainLoop:
             t,
             model_kwargs=micro_cond,
             )
+
+            #logger.log(f"forward_backward: compute_losses {compute_losses}")
           
             if last_batch or not self.use_ddp:
                 losses = compute_losses()
@@ -363,12 +377,15 @@ class TrainLoop:
             model_kwargs = {}
        
             if self.class_cond:
-                classes = th.randint(
-                    low=0, high=self.num_classes, size=(1,), device=dist_util.dev()
-                ).expand(self.batch_size)
-                model_kwargs["y"] = classes
+                # classes = th.randint(
+                #     low=0, high=self.num_classes, size=(1,), device=dist_util.dev()
+                # ).expand(self.batch_size)
+                classes = th.tensor([4,4,4,4], device=dist_util.dev())
+                model_kwargs['label'] = classes
+            
             
             sample_dict =  {'model_kwargs':model_kwargs}
+            logger.log(f"sample_dict: {sample_dict}")
 
             if self.sample_fn == 'dpm_solver':
                
@@ -378,7 +395,7 @@ class TrainLoop:
                 #     'total_N': len(self.diffusion.betas), \
                 #     'model_fn': self.model})
 
-                dpm_solver = DPM_Solver(model=self.model, \
+                dpm_solver = DPM_Solver(model=self.model, model_kwargs=model_kwargs, \
                     alphas_cumprod=th.tensor(self.diffusion.alphas_cumprod))
                 x_T = {"video":th.randn([self.batch_size, *self.model.video_size]).to(dist_util.dev()), \
                         "audio":th.randn([self.batch_size, *self.model.audio_size]).to(dist_util.dev())}
@@ -390,7 +407,7 @@ class TrainLoop:
                     method="adaptive",
                 )
             elif self.sample_fn == "dpm_solver++":
-                dpm_solver = DPM_Solver(model=self.model, \
+                dpm_solver = DPM_Solver(model=self.model,model_kwargs=model_kwargs, \
                     alphas_cumprod=th.tensor(self.diffusion.alphas_cumprod),
                     predict_x0=True, thresholding=True)
                 x_T = {"video":th.randn([self.batch_size, *self.model.video_size]).to(dist_util.dev()), \
@@ -420,13 +437,12 @@ class TrainLoop:
             sample_video = ((sample_video + 1) * 127.5).clamp(0, 255).to(th.uint8)
             #[4,16,3,64,64]
             
-            
             gathered_sample_videos = [th.zeros_like(sample_video) for _ in range(dist.get_world_size())]
             dist.all_gather(gathered_sample_videos, sample_video)  # gather not supported with NCCL
             #[12,16,3,64,64]
-           
             all_videos.extend([sample_video.cpu().permute(0,1,3,4,2).numpy() for sample_video in gathered_sample_videos])
-
+            all_labels.extend([classes.cpu().numpy() for _ in range(dist.get_world_size())])  # Store the labels
+            
             gathered_sample_audios = [th.zeros_like(sample_audio) for _ in range(dist.get_world_size())]
             dist.all_gather(gathered_sample_audios, sample_audio)  # gather not supported with NCCL
       
@@ -437,12 +453,24 @@ class TrainLoop:
         
         all_videos = np.concatenate(all_videos, axis=0)
         all_audios = np.concatenate(all_audios, axis=0)
+        all_labels = np.concatenate(all_labels, axis=0)
+        logger.log(f"all_labels: {all_labels}")
+
         output_path = os.path.join(logger.get_dir(), f"{self.sample_fn}_samples_steps{self.step}.gif")
+
+        # Create directories for each unique label
+        unique_labels = np.unique(all_labels)
+        for label in unique_labels:
+           label_dir = os.path.join(logger.get_dir(), str(label))
+           logger.log(f"label_dir: {label_dir}")
+           os.makedirs(label_dir, exist_ok=True)
+
         if  dist.get_rank() == 0:  
             save_one_video(all_videos, output_path, row=self.save_row)
             if self.save_type == "mp4":
                 vid = 0
-                for video, audio in zip(all_videos, all_audios):
+                for video, audio, label in zip(all_videos, all_audios,all_labels):
+                    label_dir = os.path.join(logger.get_dir(), str(label))
                     imgs = [img for img in video]
                     audio = audio.T #[len, channel]
                     audio = np.repeat(audio, 2, axis=1)
@@ -450,7 +478,8 @@ class TrainLoop:
    
                     video_clip = ImageSequenceClip(imgs, fps=self.video_fps)
                     video_clip = video_clip.set_audio(audio_clip)
-                    output_mp4_path =  os.path.join(logger.get_dir(), f"{self.sample_fn}_samples_steps{self.step}_{vid}.{self.save_type}")
+                    output_mp4_path =  os.path.join(label_dir, f"{self.sample_fn}_samples_steps{self.step}_{vid}.{self.save_type}")
+                    logger.log(f"output_mp4_path: {output_mp4_path}")
                     video_clip.write_videofile(output_mp4_path, self.video_fps, audio=True, audio_fps=self.audio_fps)
                     vid += 1
                     

@@ -44,13 +44,13 @@ def model_defaults():
         audio_attention_resolutions="-1",
         channel_mult="",
         dropout=0.0,
-        class_cond=False,
         use_checkpoint=False,
         use_scale_shift_norm=True,
         resblock_updown=False,
         use_fp16=False,
         video_type="2d+1d",
         audio_type="1d",
+        num_classes=0,
     )
     return res
 
@@ -88,7 +88,8 @@ def create_model_and_diffusion(
     use_fp16,
     video_type="2d+1d",
     audio_type="1d",
-    class_cond=False
+    num_classes=0,
+    
 ):
     model = create_model(
         video_size=video_size,
@@ -97,7 +98,6 @@ def create_model_and_diffusion(
         num_res_blocks=num_res_blocks,
         channel_mult=channel_mult,
         learn_sigma=learn_sigma,
-        class_cond=class_cond,
         use_checkpoint=use_checkpoint,
         cross_attention_resolutions=cross_attention_resolutions,
         cross_attention_windows=cross_attention_windows,
@@ -113,6 +113,7 @@ def create_model_and_diffusion(
         use_fp16=use_fp16,
         video_type=video_type,
         audio_type=audio_type,
+        num_classes=num_classes,
        
     )
     diffusion = create_gaussian_diffusion(
@@ -135,11 +136,10 @@ def create_model(
     num_res_blocks,
     channel_mult="",
     learn_sigma=False,
-    class_cond=False,
     use_checkpoint=False,
     cross_attention_resolutions="2,4,8",
     video_attention_resolutions="2,4,8",
-    audio_attention_resolutions="2,4,8",
+    audio_attention_resolutions="-1",
     cross_attention_windows="1,4,8",
     cross_attention_shift=True,
     num_heads=1,
@@ -150,7 +150,8 @@ def create_model(
     use_fp16=False,
     video_type="2d+1d",
     audio_type="1d",
-    resblock_updown=True
+    resblock_updown=True,
+    num_classes=0,
 ):
     
     image_size = video_size[-1] 
@@ -187,10 +188,9 @@ def create_model(
         audio_attention_resolutions=audio_attention_resolutions,
         video_type=video_type,
         audio_type= audio_type,
-
         dropout=dropout,
         channel_mult=channel_mult,
-        num_classes=None,
+        num_classes=num_classes,
         use_checkpoint=use_checkpoint,
         use_fp16=use_fp16,
         num_heads=num_heads,
